@@ -6,8 +6,7 @@ import com.google.gson.JsonObject;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
-import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
@@ -16,24 +15,15 @@ import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.SliderWidget;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.render.BufferBuilder;
-import net.minecraft.client.render.BufferRenderer;
-import net.minecraft.client.render.GameRenderer;
-import net.minecraft.client.render.Tessellator;
-import net.minecraft.client.render.VertexFormat;
-import net.minecraft.client.render.VertexFormats;
+import net.minecraft.client.render.RenderTickCounter;
 import net.minecraft.client.util.InputUtil;
-import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
-import net.minecraft.util.math.RotationAxis;
-import com.mojang.blaze3d.systems.RenderSystem;
-import org.joml.Matrix4f;
+import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Collections;
 import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
 
@@ -43,8 +33,6 @@ public class ChinaHatClient implements ClientModInitializer {
 
     private static final KeyBinding.Category CATEGORY =
             KeyBinding.Category.create(Identifier.of("chinahat", "main"));
-
-    private static final Identifier HAT_TEXTURE = Identifier.of("chinahat", "textures/hat.png");
 
     private boolean hatEnabled = true;
     private float hatSize = 1.0f;   // 0.3 .. 2.0
@@ -65,65 +53,91 @@ public class ChinaHatClient implements ClientModInitializer {
                 CATEGORY));
 
         ClientTickEvents.END_CLIENT_TICK.register(this::onTick);
-        WorldRenderEvents.LAST.register(this::renderHat);
+        HudRenderCallback.EVENT.register(this::renderHat);
     }
 
     private void onTick(MinecraftClient client) {
         while (settingsKey.wasPressed()) {
             if (client.currentScreen == null) {
-                client.setScreen(new HatSettingsScreen(Text.literal("ChinaHat — настройка шляпы")));
+                client.setScreen(new HatSettingsScreen(Text.literal("ChinaHat")));
             }
         }
     }
 
-    // ===================== отрисовка шляпы =====================
+    // ===================== шляпа (HUD + проекция 3D -> экран) =====================
 
-    private void renderHat(WorldRenderContext context) {
+    private void renderHat(DrawContext ctx, RenderTickCounter tickCounter) {
         if (!hatEnabled) return;
         MinecraftClient client = MinecraftClient.getInstance();
         ClientPlayerEntity me = client.player;
-        if (me == null) return;
+        if (me == null || client.world == null || client.options.hudHidden) return;
 
-        RenderSystem.setShader(GameRenderer::getPositionTexColorProgram);
-        RenderSystem.setShaderTexture(0, HAT_TEXTURE);
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.disableCull();
+        float tickDelta = tickCounter.getTickDelta(true);
+        var camera = client.gameRenderer.getCamera();
+        Vec3d camPos = camera.getPos();
+        Vec3d pos = me.getLerpedPos(tickDelta);
 
-        double camX = context.camera().getPos().x;
-        double camY = context.camera().getPos().y;
-        double camZ = context.camera().getPos().z;
+        // точка над головой
+        double hx = pos.x;
+        double hy = pos.y + me.getHeight() + 0.15;
+        double hz = pos.z;
 
-        float r = hatRed / 255f;
-        float g = hatGreen / 255f;
-        float b = hatBlue / 255f;
-        float w = 0.75f * hatSize;
-        float h = 1.1f * hatSize;
+        double dx = hx - camPos.x;
+        double dy = hy - camPos.y;
+        double dz = hz - camPos.z;
 
-        MatrixStack ms = context.matrixStack();
+        double yaw = Math.toRadians(camera.getYaw());
+        double pitch = Math.toRadians(camera.getPitch());
 
-        for (ClientPlayerEntity player : Collections.singletonList(me)) {
-            var pos = player.getLerpedPos(context.tickDelta());
-            double baseY = pos.y + player.getHeight() + 0.1;
+        // базис камеры
+        double fx = -Math.sin(yaw) * Math.cos(pitch);
+        double fy = -Math.sin(pitch);
+        double fz =  Math.cos(yaw) * Math.cos(pitch);
 
-            ms.push();
-            ms.translate(pos.x - camX, baseY - camY, pos.z - camZ);
-            ms.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(-context.camera().getYaw()));
-            ms.multiply(RotationAxis.POSITIVE_X.rotationDegrees(context.camera().getPitch()));
-            Matrix4f m = ms.peek().getPositionMatrix();
+        double rx = -fz, ry = 0.0, rz = fx;                 // right = forward x (0,1,0)
+        double ux = ry * fz - rz * fy;                      // up = right x forward
+        double uy = rz * fx - rx * fz;
+        double uz = rx * fy - ry * fx;
 
-            BufferBuilder bb = Tessellator.getInstance().begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_TEXTURE_COLOR);
-            bb.vertex(m, -w, 0, 0).texture(0, 1).color(r, g, b, 1f).next();
-            bb.vertex(m,  w, 0, 0).texture(1, 1).color(r, g, b, 1f).next();
-            bb.vertex(m,  w, h, 0).texture(1, 0).color(r, g, b, 1f).next();
-            bb.vertex(m, -w, h, 0).texture(0, 0).color(r, g, b, 1f).next();
-            BufferRenderer.drawWithGlobalProgram(bb.end());
+        double vx = dx * rx + dy * ry + dz * rz;
+        double vy = dx * ux + dy * uy + dz * uz;
+        double vz = dx * fx + dy * fy + dz * fz;
 
-            ms.pop();
+        if (vz < 0.15) return;                              // за спиной / слишком близко
+
+        int sw = client.getWindow().getScaledWidth();
+        int sh = client.getWindow().getScaledHeight();
+        double aspect = (double) sw / sh;
+        double fov = Math.toRadians(client.options.getFov().getValue());
+        double f = 1.0 / Math.tan(fov / 2.0);
+
+        double ndcX = (vx * f / aspect) / vz;
+        double ndcY = (vy * f) / vz;
+        int cx = (int) Math.round(sw / 2.0 * (1.0 + ndcX));
+        int cy = (int) Math.round(sh / 2.0 * (1.0 - ndcY));
+
+        // перспективный размер: ближе = больше
+        int hatH = (int) Math.round(140.0 * hatSize / vz);
+        hatH = Math.max(6, Math.min(160, hatH));
+        int hatW = Math.max(4, Math.round(hatH * 1.35f));
+
+        int color = 0xFF000000 | (hatRed << 16) | (hatGreen << 8) | hatBlue;
+        int dark = 0xFF000000
+                | (Math.max(0, (int) (hatRed * 0.75)) << 16)
+                | (Math.max(0, (int) (hatGreen * 0.75)) << 8)
+                | Math.max(0, (int) (hatBlue * 0.75));
+
+        // поля шляпы — чуть шире и ниже основания
+        ctx.fill(cx - hatW / 2 - 2, cy, cx + hatW / 2 + 2, cy + Math.max(2, hatH / 10), dark);
+        // конус — стопка сужающихся полос
+        int rows = 9;
+        int rowH = Math.max(1, hatH / rows);
+        for (int i = 0; i <= rows; i++) {
+            float t = i / (float) rows;                     // 0 = низ, 1 = верх
+            int w = Math.max(1, Math.round(hatW * (1f - t * 0.88f)));
+            int y = cy - i * rowH;
+            ctx.fill(cx - w / 2, y - rowH, cx + w / 2, y, i == rows ? dark : color);
         }
-
-        RenderSystem.enableCull();
-        RenderSystem.disableBlend();
     }
 
     // ===================== конфиг =====================
@@ -190,12 +204,6 @@ public class ChinaHatClient implements ClientModInitializer {
 
             addDrawableChild(ButtonWidget.builder(Text.literal("Готово"), b -> close())
                     .dimensions(cx, 178, 200, 20).build());
-        }
-
-        @Override
-        public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-            super.render(context, mouseX, mouseY, delta);
-            context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, 12, 0xFFFFFFFF);
         }
 
         @Override
