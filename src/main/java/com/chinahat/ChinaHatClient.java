@@ -72,22 +72,18 @@ public class ChinaHatClient implements ClientModInitializer {
         ClientPlayerEntity me = client.player;
         if (me == null || client.world == null || client.options.hudHidden) return;
 
-        float tickDelta = tickCounter.getTickDelta(true);
-        var camera = client.gameRenderer.getCamera();
-        Vec3d camPos = camera.getPos();
-        Vec3d pos = me.getLerpedPos(tickDelta);
+                Vec3d camPos = new Vec3d(me.getX(), me.getY() + 1.62, me.getZ());
+        double hx = me.getX();
+        double hy = me.getY() + me.getHeight() + 0.15;
+        double hz = me.getZ();
 
-        // точка над головой
-        double hx = pos.x;
-        double hy = pos.y + me.getHeight() + 0.15;
-        double hz = pos.z;
 
         double dx = hx - camPos.x;
         double dy = hy - camPos.y;
         double dz = hz - camPos.z;
 
-        double yaw = Math.toRadians(camera.getYaw());
-        double pitch = Math.toRadians(camera.getPitch());
+        double yaw = Math.toRadians(me.getYaw());
+        double pitch = Math.toRadians(me.getPitch());
 
         // базис камеры
         double fx = -Math.sin(yaw) * Math.cos(pitch);
