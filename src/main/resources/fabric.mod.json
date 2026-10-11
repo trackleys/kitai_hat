@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "chinahat",
+  "version": "${version}",
+  "name": "ChinaHat",
+  "description": "\u041a\u0438\u0442\u0430\u0439\u0441\u043a\u0430\u044f \u0448\u043b\u044f\u043f\u0430 \u043d\u0430\u0434 \u0433\u043e\u043b\u043e\u0432\u043e\u0439 \u0441 \u043d\u0430\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0435\u043c\u044b\u043c \u0446\u0432\u0435\u0442\u043e\u043c \u0438 \u0440\u0430\u0437\u043c\u0435\u0440\u043e\u043c.",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.chinahat.ChinaHatClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "fabric-api": "*",
+    "minecraft": "1.21.11",
+    "java": ">=21"
+  }
+}
